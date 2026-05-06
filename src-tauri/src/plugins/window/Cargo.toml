@@ -10,6 +10,7 @@ links = "tauri-plugin-eco-window"
 [dependencies]
 tauri.workspace = true
 serde.workspace = true
+log.workspace = true
 
 [build-dependencies]
 tauri-plugin.workspace = true
