@@ -2,6 +2,8 @@ use std::{
     fs::{create_dir_all, OpenOptions},
     io::Write,
     path::PathBuf,
+    thread,
+    time::Duration,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{async_runtime::spawn, AppHandle, Manager, Runtime, WebviewWindow};
@@ -56,42 +58,82 @@ fn append_crash_event(message: impl AsRef<str>) {
     }
 }
 
+fn focus_window_later<R: Runtime>(window: WebviewWindow<R>) {
+    spawn(async move {
+        for delay_ms in [80, 180] {
+            thread::sleep(Duration::from_millis(delay_ms));
+
+            if window.is_focused().unwrap_or(false) {
+                append_crash_event(format!(
+                    "window focus skipped: label={}, already focused",
+                    window.label()
+                ));
+                return;
+            }
+
+            if let Err(error) = window.set_focus() {
+                append_crash_event(format!(
+                    "window focus failed: label={}, delay_ms={delay_ms}, error={error}",
+                    window.label()
+                ));
+            } else {
+                append_crash_event(format!(
+                    "window focus requested: label={}, delay_ms={delay_ms}",
+                    window.label()
+                ));
+            }
+        }
+    });
+}
+
 // 共享显示窗口的方法
 fn shared_show_window<R: Runtime>(window: &WebviewWindow<R>) {
     let is_visible = window.is_visible().unwrap_or(false);
     let is_minimized = window.is_minimized().unwrap_or(false);
+    let is_focused = window.is_focused().unwrap_or(false);
 
     log::info!(
-        "show_window requested: label={}, visible={}, minimized={}",
+        "show_window requested: label={}, visible={}, minimized={}, focused={}",
         window.label(),
         is_visible,
-        is_minimized
+        is_minimized,
+        is_focused
     );
     append_crash_event(format!(
-        "window show requested: label={}, visible={}, minimized={}",
+        "window show requested: label={}, visible={}, minimized={}, focused={}",
         window.label(),
         is_visible,
-        is_minimized
+        is_minimized,
+        is_focused
     ));
 
-    if is_visible && !is_minimized {
+    if is_visible && !is_minimized && is_focused {
         append_crash_event(format!(
-            "window show skipped: label={}, already visible",
+            "window show skipped: label={}, already visible and focused",
             window.label()
         ));
         return;
     }
 
-    if let Err(error) = window.show() {
-        append_crash_event(format!("window show failed: label={}, error={error}", window.label()));
+    if !is_visible {
+        if let Err(error) = window.show() {
+            append_crash_event(format!(
+                "window show failed: label={}, error={error}",
+                window.label()
+            ));
+        }
     }
 
-    if let Err(error) = window.unminimize() {
-        append_crash_event(format!(
-            "window unminimize failed: label={}, error={error}",
-            window.label()
-        ));
+    if is_minimized {
+        if let Err(error) = window.unminimize() {
+            append_crash_event(format!(
+                "window unminimize failed: label={}, error={error}",
+                window.label()
+            ));
+        }
     }
+
+    focus_window_later(window.clone());
 }
 
 // 共享隐藏窗口的方法
